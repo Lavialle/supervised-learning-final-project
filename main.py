@@ -6,7 +6,8 @@
 5. Save the trained model to a file.
 """
 
-# 0. Get the requirements from requirements.txt and install them using pip.
+# 0. Get the requirements from requirements.txt and install them using pip if not already installed.
+
 # with open("requirements.txt") as f:
 #     requirements = f.readlines()
 # import subprocess
@@ -307,6 +308,17 @@ print(cleaned_df.dtypes)
 print(cleaned_df.isna().sum())
 print(cleaned_df.shape)
 ## ========== STEP 2: ColumnTransformer for scaling and encoding ==========
+
+# Generate a profile report to check the cleaned data
+PROFILE_REPORT_PATH = Path("cleaned_profile.html")
+if PROFILE_REPORT_PATH.exists():
+    PROFILE_REPORT_PATH.unlink(missing_ok=True)
+    print("Existing profile report removed")
+generate_profile_report(cleaned_df, PROFILE_REPORT_PATH, title="Profiling Report on Bacteria Dataset Cleaned")
+if not PROFILE_REPORT_PATH.exists():
+    raise StopExecution(
+        f"The profile report was not generated at {PROFILE_REPORT_PATH}"
+    )
 
 # numerical_cols, boolean_cols, categorical_cols = get_column_types(RAW_BACTERIA_RESISTANCE_DF)
 

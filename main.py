@@ -14,11 +14,13 @@
 # for requirement in requirements:
 #     subprocess.check_call(["pip", "install", requirement.strip()])
 
+
 # Import necessary librairies
 import pandas as pd # for data manipulation
 import numpy as np # for numerical operations
 
 from IPython.display import display # for displaying dataframes
+from sklearn.model_selection import train_test_split, cross_val_score
 from ydata_profiling import ProfileReport # for generating data profile reports
 from pathlib import Path # for handling file paths
 
@@ -28,6 +30,11 @@ from sklearn.compose import ColumnTransformer # for column-wise transformations
 from sklearn.preprocessing import FunctionTransformer, StandardScaler, OneHotEncoder # for data preprocessing
 from sklearn.experimental import enable_iterative_imputer 
 from sklearn.impute import IterativeImputer # for imputing missing values
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.linear_model import LogisticRegression
 
 class StopExecution(Exception):
     def _render_traceback_(self):
@@ -72,16 +79,6 @@ def generate_profile_report(df: pd.DataFrame, output_path: Path, title: str = "P
     profile.to_file(output_path)
     print(f"Profile report generated at: {output_path}")
 
-PROFILE_REPORT_PATH = Path("profile.html")
-if PROFILE_REPORT_PATH.exists():
-    PROFILE_REPORT_PATH.unlink(missing_ok=True)
-    print("Existing profile report removed")
-generate_profile_report(RAW_BACTERIA_RESISTANCE_DF, PROFILE_REPORT_PATH)
-if not PROFILE_REPORT_PATH.exists():
-    raise StopExecution(
-        f"The profile report was not generated at {PROFILE_REPORT_PATH}"
-    )
-
 # Normalizing data for NaN values
 def normalize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -109,7 +106,6 @@ def split_age_gender(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # Split souches column to get clean strain names
-
 def split_id_strain(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df[['strain_code', 'strain']] = df['souches'].str.split(' ', n=1, expand=True) 
@@ -234,6 +230,34 @@ def clean_collection_date(df: pd.DataFrame) -> pd.DataFrame:
     df['collection_date'] = pd.to_datetime(df['collection_date'], errors='coerce', dayfirst=True)
     return df
 
+def handle_missing_dates(df: pd.DataFrame, date_col: str = "collection_date") -> pd.DataFrame:
+    """
+    Nettoie et impute les dates manquantes dans une colonne de type date.
+    - Convertit la colonne en datetime.
+    - Remplace les valeurs manquantes par la médiane des dates existantes.
+    """
+    df = df.copy()
+
+    if date_col not in df.columns:
+        return df  # si la colonne n'existe pas, on ne fait rien
+
+    # Conversion en datetime
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
+
+    # Si toutes les valeurs sont manquantes, on laisse la colonne telle quelle
+    if df[date_col].isna().all():
+        print(f"Toutes les dates sont manquantes dans '{date_col}', aucune imputation faite.")
+        return df
+
+    # Calcul de la médiane (par ex. mi-période)
+    median_date = df[date_col].dropna().median()
+
+    # Remplissage des NaN
+    df[date_col] = df[date_col].fillna(median_date)
+
+    return df
+
+
 # Drop rows where all columns EXCEPT ['id', 'address','collection_date','notes'] are NaN
 def drop_all_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -250,40 +274,51 @@ def get_column_types(df: pd.DataFrame):
         'an_norm', 'acide_nalidixique_norm', 'ofx_norm', 'cip_norm', 'c_norm',
         'co-trimoxazole_norm', 'furanes_norm', 'colistine_norm', 'strain_norm'
     ]
-    return numerical_cols, boolean_cols, categorical_cols
+    date_cols = ['collection_date']
+    return numerical_cols, boolean_cols, categorical_cols, date_cols
 
-# Cast categorical columns to 'category' dtype and fill NaN with mode
-def cast_categorical_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    cat_cols = get_column_types(df)[2]
-    df[cat_cols] = df[cat_cols].astype('category')
-    for col in cat_cols:
-        if df[col].isna().any():
-            df[col] = df[col].fillna(df[col].mode()[0])
-    return df
+# Cast categorical columns to 'category' dtype
+def cast_categorical_columns(df: pd.DataFrame) -> pd.DataFrame: 
+    df = df.copy() 
+    cat_cols = get_column_types(df)[2] 
+    df[cat_cols] = df[cat_cols].astype('category') 
+    return df 
 
-# Cast boolean columns to 'boolean' dtype and fill NaN with mode
-def cast_boolean_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    bool_cols = get_column_types(df)[1]
-    for col in bool_cols:
-        df[col] = df[col].astype('boolean')
-        df[col] = df[col].fillna(df[col].mode()[0])
-    return df
-
-# Impute numerical columns using IterativeImputer
-def impute_numerical_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
+# Cast boolean columns to 'boolean' dtype 
+def cast_boolean_columns(df: pd.DataFrame) -> pd.DataFrame: 
+    df = df.copy() 
+    bool_cols = get_column_types(df)[1] 
+    df[bool_cols] = df[bool_cols].astype('boolean') 
+    return df 
+# Impute numerical columns using IterativeImputer # 
+def cast_numerical_columns(df: pd.DataFrame) -> pd.DataFrame: 
+    df = df.copy() 
     num_cols = get_column_types(df)[0]
     df[num_cols] = df[num_cols].apply(pd.to_numeric, errors='coerce')
-    iter_imputer = IterativeImputer(max_iter=10, random_state=0)
-    df[num_cols] = iter_imputer.fit_transform(df[num_cols])
     return df
 
 # Construction  of the preprocessing pipeline
 # ========== STEP 1: Global Cleaning Pipeline ==========
 
-def global_cleaning(df: pd.DataFrame) -> pd.DataFrame:
+def global_cleaning(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
+    """
+    Nettoyage complet du dataset :
+    - Nettoyage des noms de colonnes
+    - Normalisation des valeurs manquantes
+    - Split colonnes age/gender et souches
+    - Nettoyage et normalisation des noms de souches
+    - Uniformisation des valeurs de susceptibilité aux antibiotiques
+    - Suppression des doublons
+    - Normalisation des colonnes booléennes
+    - Nettoyage et imputation des dates
+    - Suppression des lignes entièrement NaN (sauf colonnes optionnelles)
+    - Cast des colonnes catégorielles et booléennes
+    - Imputation des colonnes numériques
+    - Suppression optionnelle de colonnes
+    """
+    df = df.copy()
+
+    # Cleaning and general preprocessing steps
     df = clean_column_names(df)
     df = normalize_missing_values(df)
     df = split_age_gender(df)
@@ -294,63 +329,165 @@ def global_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     df = drop_duplicates(df)
     df = normalize_boolean_columns(df)
     df = clean_collection_date(df)
+    df = handle_missing_dates(df, date_col="collection_date")  # imputation dates
+
+    # Empty rows removal
     df = drop_all_nan_rows(df)
-    df = cast_categorical_columns(df)
+
+    # Cast columns
     df = cast_boolean_columns(df)
-    df = impute_numerical_columns(df)
+    df = cast_categorical_columns(df)
+    df = cast_numerical_columns(df)
+
+    # Optional drop columns
+    if drop_columns:
+        df.drop(columns=drop_columns, inplace=True, errors='ignore')
+
     return df
 
-cleaning_step = FunctionTransformer(global_cleaning, validate=False)
+
+# ==============================================================================================================================
+
+# PROFILE_REPORT_PATH = Path("profile.html")
+# if PROFILE_REPORT_PATH.exists():
+#     PROFILE_REPORT_PATH.unlink(missing_ok=True)
+#     print("Existing profile report removed")
+# generate_profile_report(RAW_BACTERIA_RESISTANCE_DF, PROFILE_REPORT_PATH)
+# if not PROFILE_REPORT_PATH.exists():
+#     raise StopExecution(
+#         f"The profile report was not generated at {PROFILE_REPORT_PATH}"
+#     )
+
+cleaning_step = FunctionTransformer(global_cleaning, kw_args={'drop_columns': ['id', 'name', 'address', 'notes', 'email', 'collection_date']}, validate=False)
 cleaned_df = cleaning_step.transform(RAW_BACTERIA_RESISTANCE_DF)
+
+# Exporting to CSV for EDA
+EDA_OUTPUT_PATH = Path("./data/cleaned_bacteria_dataset.csv")
+if not EDA_OUTPUT_PATH.exists():
+    cleaned_df.to_csv(EDA_OUTPUT_PATH, index=False)
+    print(f"Cleaned dataset exported for EDA: {EDA_OUTPUT_PATH.resolve()}")
+else:
+    print("Existing cleaned dataset for EDA found")
+
+# # Generate a profile report to check the cleaned data
+# PROFILE_REPORT_PATH = Path("cleaned_profile.html")
+# if PROFILE_REPORT_PATH.exists():
+#     PROFILE_REPORT_PATH.unlink(missing_ok=True)
+#     print("Existing profile report removed")
+# generate_profile_report(cleaned_df, PROFILE_REPORT_PATH, title="Profiling Report on Bacteria Dataset Cleaned")
+# if not PROFILE_REPORT_PATH.exists():
+#     raise StopExecution(
+#         f"The profile report was not generated at {PROFILE_REPORT_PATH}"
+#     )
+
+
 print("Dataset cleaned successfully, here is a preview of the first 10 lines:")
 print(cleaned_df.head(10))
 print(cleaned_df.dtypes)
 print(cleaned_df.isna().sum())
 print(cleaned_df.shape)
-## ========== STEP 2: ColumnTransformer for scaling and encoding ==========
 
-# Generate a profile report to check the cleaned data
-PROFILE_REPORT_PATH = Path("cleaned_profile.html")
-if PROFILE_REPORT_PATH.exists():
-    PROFILE_REPORT_PATH.unlink(missing_ok=True)
-    print("Existing profile report removed")
-generate_profile_report(cleaned_df, PROFILE_REPORT_PATH, title="Profiling Report on Bacteria Dataset Cleaned")
-if not PROFILE_REPORT_PATH.exists():
-    raise StopExecution(
-        f"The profile report was not generated at {PROFILE_REPORT_PATH}"
-    )
 
-# numerical_cols, boolean_cols, categorical_cols = get_column_types(RAW_BACTERIA_RESISTANCE_DF)
+# ========== STEP 2: ColumnTransformer for scaling and encoding ==========
 
-# preprocessor = ColumnTransformer(
-#     transformers=[
-#         ('num', Pipeline([
-#             ('imputer', IterativeImputer(random_state=0)),
-#             ('scaler', StandardScaler())
-#         ]), numerical_cols),
-#         ('bool', 'passthrough', boolean_cols),
-#         ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols)
-#     ],
-#     remainder='passthrough'  # On garde les colonnes non spécifiées
-# )
+# numerical_cols, boolean_cols, categorical_cols = get_column_types(cleaned_df)
+numerical_cols = ['age', 'infection_freq']
+categorical_cols = ['gender', 'strain_norm']
+boolean_cols = ['diabetes', 'hypertension', 'hospital_before']
 
-# # ========== STEP 3: Final Preprocessing Pipeline ==========
 
-# preprocessing_pipeline = Pipeline(steps=[
+# Encoders / scalers
+numeric_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler())
+])
+
+categorical_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='most_frequent')),
+    ('encoder', OneHotEncoder(handle_unknown='ignore'))
+])
+
+boolean_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='most_frequent'))
+])
+
+preprocessing = ColumnTransformer([
+    ('num', numeric_transformer, numerical_cols),
+    ('cat', categorical_transformer, categorical_cols),
+    ('bool', boolean_transformer, boolean_cols)
+])
+
+target_cols = [
+    'amx/amp_norm', 'amc_norm', 'cz_norm', 'fox_norm', 
+    'ctx/cro_norm', 'ipm_norm', 'gen_norm', 'an_norm',
+    'acide_nalidixique_norm', 'ofx_norm', 'cip_norm', 
+    'c_norm', 'co-trimoxazole_norm', 'furanes_norm', 'colistine_norm'
+]
+
+X = cleaned_df.drop(columns=target_cols)
+y = cleaned_df[target_cols]
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+y_train = y_train.fillna(y_train.mode().iloc[0])
+y_test = y_test.fillna(y_train.mode().iloc[0])
+
+ml_pipeline = Pipeline([
+    ('preprocessing', preprocessing),
+    ('model', MultiOutputClassifier(RandomForestClassifier(random_state=42)))
+])
+
+# Fit sur le train
+
+
+ml_pipeline.fit(X_train, y_train)
+
+# Score sur le test
+test_score = ml_pipeline.score(X_test, y_test)
+print(f"Test score: {test_score:.3f}")
+
+# Cross-validation sur le train
+# from sklearn.metrics import classification_report
+
+# y_pred = ml_pipeline.predict(X_test)
+# print(classification_report(y_test, y_pred))
+
+# cv_scores = cross_val_score(ml_pipeline, X_train, y_train, cv=5, scoring='accuracy')
+# print(f"CV scores: {cv_scores}")
+# print(f"CV mean: {cv_scores.mean():.3f}")
+
+# # Train a model for each target
+
+
+models = {}
+
+for target in target_cols:
+    print(f"Training model for {target}...")
+    model = Pipeline([
+        ('preprocess', preprocessing),
+        ('clf', RandomForestClassifier(random_state=42))
+    ])
+
+    models[target] = model
+    model.fit(X_train, y_train[target])
+    score = model.score(X_test, y_test[target])
+    print(f"Test score for {target}: {score:.3f}")
+# # Test multi-model
+
+
+# multi_model = Pipeline([
 #     ('cleaning', cleaning_step),
-#     ('transform', preprocessor)
+#     ('preprocess', preprocessing),
+#     ('clf', MultiOutputClassifier(RandomForestClassifier(random_state=42)))
 # ])
 
-# # ========== STEP 4: Pipeline Application ==========
+# # One vs Rest Classifier example
 
-# cleaned_array = preprocessing_pipeline.fit_transform(RAW_BACTERIA_RESISTANCE_DF)
 
-# # Reconstituer un DataFrame propre (colonnes encodées incluses)
-# encoded_cat_cols = preprocessing_pipeline.named_steps['transform'] \
-#     .named_transformers_['cat'].get_feature_names_out(categorical_cols)
 
-# final_columns = numerical_cols + boolean_cols + list(encoded_cat_cols)
-# cleaned_df = pd.DataFrame(cleaned_array, columns=final_columns)
-
-# print("Dataset nettoyé et transformé avec succès :")
-# display(cleaned_df.head())
+# ovr_model = Pipeline([
+#     ('preprocess', preprocessing),
+#     ('clf', OneVsRestClassifier(LogisticRegression(max_iter=1000)))
+# ])
+# ovr_model.fit(X_train, y_train)
+# ovr_score = ovr_model.score(X_test, y_test)

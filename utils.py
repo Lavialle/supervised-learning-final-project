@@ -103,7 +103,7 @@ def norm_ast(v):
     if s.startswith('S'): 
         return 'S'
     if s.startswith('I') or 'INTER' in s: 
-        return 'I'
+        return 'S'
     return np.nan
 
 def uniformize_susceptibility_values(df: pd.DataFrame) -> pd.DataFrame:
@@ -114,7 +114,11 @@ def uniformize_susceptibility_values(df: pd.DataFrame) -> pd.DataFrame:
         'co-trimoxazole', 'furanes', 'colistine'
     ]
     for col in ab_cols:
-        df[col+"_norm"] = df[col].apply(norm_ast)
+        # Appliquer la normalisation
+        df[col + "_norm"] = df[col].apply(norm_ast)
+        # Créer une colonne binaire 'is_resistant' (1 si R, sinon 0)
+        df[col + "_resistant"] = (df[col + "_norm"] == 'R').astype(int)
+        # Supprimer l'ancienne colonne
         df.drop(columns=[col], inplace=True)
     return df
 
@@ -164,33 +168,6 @@ def clean_collection_date(df: pd.DataFrame) -> pd.DataFrame:
     df['collection_date'] = pd.to_datetime(df['collection_date'], errors='coerce', dayfirst=True)
     return df
 
-def handle_missing_dates(df: pd.DataFrame, date_col: str = "collection_date") -> pd.DataFrame:
-    """
-    Nettoie et impute les dates manquantes dans une colonne de type date.
-    - Convertit la colonne en datetime.
-    - Remplace les valeurs manquantes par la médiane des dates existantes.
-    """
-    df = df.copy()
-
-    if date_col not in df.columns:
-        return df  # si la colonne n'existe pas, on ne fait rien
-
-    # Conversion en datetime
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
-
-    # Si toutes les valeurs sont manquantes, on laisse la colonne telle quelle
-    if df[date_col].isna().all():
-        print(f"Toutes les dates sont manquantes dans '{date_col}', aucune imputation faite.")
-        return df
-
-    # Calcul de la médiane (par ex. mi-période)
-    median_date = df[date_col].dropna().median()
-
-    # Remplissage des NaN
-    df[date_col] = df[date_col].fillna(median_date)
-
-    return df
-
 
 # Drop rows where all columns EXCEPT ['id', 'address','collection_date','notes'] are NaN
 def drop_all_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -230,3 +207,4 @@ def cast_numerical_columns(df: pd.DataFrame) -> pd.DataFrame:
     num_cols = get_column_types(df)[0]
     df[num_cols] = df[num_cols].apply(pd.to_numeric, errors='coerce')
     return df
+

@@ -67,8 +67,8 @@ You probably made a mistake while copying the dataset file on your machine:
 {RAW_BACTERIA_RESISTANCE_PATH.resolve()}"""
     )
 
-print("Dataset loaded successfully, here is a preview of the first 10 lines:")
-display(RAW_BACTERIA_RESISTANCE_DF.head(n=10))
+print("Dataset loaded successfully!")
+
 
 # 2. Preprocess the data
 
@@ -106,7 +106,6 @@ def global_cleaning(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
     df = utils.drop_duplicates(df)
     df = utils.normalize_boolean_columns(df)
     df = utils.clean_collection_date(df)
-    df = utils.handle_missing_dates(df, date_col="collection_date")  # imputation dates
 
     # Empty rows removal
     df = utils.drop_all_nan_rows(df)
@@ -158,8 +157,7 @@ else:
 #     )
 
 
-print("Dataset cleaned successfully, here is a preview of the first 10 lines:")
-print(cleaned_df.head(10))
+
 print(cleaned_df.dtypes)
 print(cleaned_df.isna().sum())
 print(cleaned_df.shape)
@@ -181,7 +179,7 @@ numeric_transformer = Pipeline([
 
 categorical_transformer = Pipeline([
     ('imputer', SimpleImputer(strategy='most_frequent')),
-    ('encoder', OneHotEncoder(handle_unknown='ignore'))
+    ('encoder', OneHotEncoder(handle_unknown='ignore', drop='if_binary'))
 ])
 
 boolean_transformer = Pipeline([
@@ -195,10 +193,10 @@ preprocessing = ColumnTransformer([
 ])
 
 target_cols = [
-    'amx/amp_norm', 'amc_norm', 'cz_norm', 'fox_norm', 
-    'ctx/cro_norm', 'ipm_norm', 'gen_norm', 'an_norm',
-    'acide_nalidixique_norm', 'ofx_norm', 'cip_norm', 
-    'c_norm', 'co-trimoxazole_norm', 'furanes_norm', 'colistine_norm'
+    'amx/amp_resistant', 'amc_resistant', 'cz_resistant', 'fox_resistant', 
+    'ctx/cro_resistant', 'ipm_resistant', 'gen_resistant', 'an_resistant',
+    'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 
+    'c_resistant', 'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant'
 ]
 
 X = cleaned_df.drop(columns=target_cols)
@@ -209,19 +207,8 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 y_train = y_train.fillna(y_train.mode().iloc[0])
 y_test = y_test.fillna(y_train.mode().iloc[0])
 
-ml_pipeline = Pipeline([
-    ('preprocessing', preprocessing),
-    ('model', MultiOutputClassifier(RandomForestClassifier(random_state=42)))
-])
 
 # Fit sur le train
-
-
-ml_pipeline.fit(X_train, y_train)
-
-# Score sur le test
-test_score = ml_pipeline.score(X_test, y_test)
-print(f"Test score: {test_score:.3f}")
 
 # Cross-validation sur le train
 # from sklearn.metrics import classification_report
@@ -234,37 +221,38 @@ print(f"Test score: {test_score:.3f}")
 # print(f"CV mean: {cv_scores.mean():.3f}")
 
 # # Train a model for each target
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
 
 
 models = {}
 
 for target in target_cols:
     print(f"Training model for {target}...")
-    model = Pipeline([
+    SeparateModel = Pipeline([
         ('preprocess', preprocessing),
         ('clf', RandomForestClassifier(random_state=42))
     ])
 
-    models[target] = model
-    model.fit(X_train, y_train[target])
-    score = model.score(X_test, y_test[target])
-    print(f"Test score for {target}: {score:.3f}")
-# # Test multi-model
+    models[target] = SeparateModel
+    SeparateModel.fit(X_train, y_train[target])
+    cv_scores = cross_val_score(SeparateModel, X_train, y_train[target], cv=5, scoring="f1")
+    print(f"CV scores: {cv_scores}")
+    print(f"CV mean: {cv_scores.mean():.3f}")
+    y_pred = SeparateModel.predict(X_test)
+    print(classification_report(y_test[target], y_pred, target_names=["Resistant", "Susceptible"]))
 
-
-# multi_model = Pipeline([
-#     ('cleaning', cleaning_step),
-#     ('preprocess', preprocessing),
-#     ('clf', MultiOutputClassifier(RandomForestClassifier(random_state=42)))
-# ])
-
-# # One vs Rest Classifier example
-
-
-
-# ovr_model = Pipeline([
-#     ('preprocess', preprocessing),
-#     ('clf', OneVsRestClassifier(LogisticRegression(max_iter=1000)))
-# ])
-# ovr_model.fit(X_train, y_train)
-# ovr_score = ovr_model.score(X_test, y_test)
+# One vs Rest Classifier example
+ovr_model = Pipeline([
+    ('preprocess', preprocessing),
+    ('clf', OneVsRestClassifier(LogisticRegression(max_iter=1000, class_weight='balanced')))
+])
+ovr_model.fit(X_train, y_train)
+cv_scores = cross_val_score(ovr_model, X_train, y_train, cv=5, scoring="f1_weighted")
+print(f"CV scores: {cv_scores}")
+print(f"CV mean: {cv_scores.mean():.3f}")
+target_names = ['amx/amp', 'amc', 'cz', 'fox', 'ctx/cro', 'ipm', 'gen', 'an', 'acide_nalidixique', 'ofx', 'cip', 'c', 'co-trimoxazole', 'furanes', 'colistine']
+ovr_score = ovr_model.score(X_test, y_test)
+y_pred = ovr_model.predict(X_test)
+print(classification_report(y_test, y_pred, target_names=target_names))

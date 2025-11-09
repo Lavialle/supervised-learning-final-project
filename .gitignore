@@ -10,3 +10,10 @@ venv/
 # IDE files
 .vscode/
 .idea/
+
+# Cat boost files
+catboost_info/
+
+# MLFlow files
+mlruns/
+mlartifacts/

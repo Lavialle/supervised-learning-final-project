@@ -8,21 +8,16 @@
 
 # 0. Get the requirements from requirements.txt and install them using pip if not already installed.
 
-# with open("requirements.txt") as f:
-#     requirements = f.readlines()
-# import subprocess
-# for requirement in requirements:
-#     subprocess.check_call(["pip", "install", requirement.strip()])
-
 
 # Import necessary librairies
 import utils  # custom utility functions for data preprocessing
-
+import mlflow
+import mlflow.sklearn
 import pandas as pd # for data manipulation
 import numpy as np # for numerical operations
 from pathlib import Path # for handling file paths
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold, GridSearchCV
+from sklearn.metrics import classification_report, f1_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 
@@ -30,20 +25,27 @@ from sklearn.exceptions import NotFittedError # for handling exceptions
 from sklearn.pipeline import Pipeline # for creating machine learning pipelines
 from sklearn.compose import ColumnTransformer # for column-wise transformations
 from sklearn.preprocessing import FunctionTransformer, StandardScaler, OneHotEncoder # for data preprocessing
-from sklearn.experimental import enable_iterative_imputer 
-from sklearn.impute import IterativeImputer # for imputing missing values
-from sklearn.impute import SimpleImputer
+from sklearn.impute import SimpleImputer # for imputing missing values
+
+# Model imports
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.multiclass import OneVsRestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import HistGradientBoostingClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+
+classification_models = {
+    'XGBoost': XGBClassifier(n_estimators=500, learning_rate=0.05, max_depth=6, use_label_encoder=False),
+    'LightGBM': LGBMClassifier(n_estimators=500, learning_rate=0.05, num_leaves=31),
+    'CatBoost': CatBoostClassifier(iterations=500, learning_rate=0.05, depth=6, verbose=0)
+}
 
 class StopExecution(Exception):
     def _render_traceback_(self):
         return []
 
 # 1. load the dataset
-
 RAW_BACTERIA_RESISTANCE_PATH = Path("./data/Bacteria_dataset_Multiresictance.csv")
 
 if not RAW_BACTERIA_RESISTANCE_PATH.exists():
@@ -77,23 +79,7 @@ print("Dataset loaded successfully!")
 # ========== STEP 1: Global Cleaning Pipeline ==========
 
 def global_cleaning(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
-    """
-    Nettoyage complet du dataset :
-    - Nettoyage des noms de colonnes
-    - Normalisation des valeurs manquantes
-    - Split colonnes age/gender et souches
-    - Nettoyage et normalisation des noms de souches
-    - Uniformisation des valeurs de susceptibilité aux antibiotiques
-    - Suppression des doublons
-    - Normalisation des colonnes booléennes
-    - Nettoyage et imputation des dates
-    - Suppression des lignes entièrement NaN (sauf colonnes optionnelles)
-    - Cast des colonnes catégorielles et booléennes
-    - Imputation des colonnes numériques
-    - Suppression optionnelle de colonnes
-    """
     df = df.copy()
-
     # Cleaning and general preprocessing steps
     df = utils.clean_column_names(df)
     df = utils.normalize_missing_values(df)
@@ -105,37 +91,26 @@ def global_cleaning(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
     df = utils.drop_duplicates(df)
     df = utils.normalize_boolean_columns(df)
     df = utils.clean_collection_date(df)
-
     # Empty rows removal
     df = utils.drop_all_nan_rows(df)
-
-    # Cast columns
-    df = utils.cast_boolean_columns(df)
-    df = utils.cast_categorical_columns(df)
-    df = utils.cast_numerical_columns(df)
-
-    # Optional drop columns
+    # Optional drop columnss
     if drop_columns:
         df.drop(columns=drop_columns, inplace=True, errors='ignore')
 
     return df
 
 
-# ==============================================================================================================================
 
-PROFILE_REPORT_PATH = Path("profile.html")
-if PROFILE_REPORT_PATH.exists():
-    PROFILE_REPORT_PATH.unlink(missing_ok=True)
-    print("Existing profile report removed")
-utils.generate_profile_report(RAW_BACTERIA_RESISTANCE_DF, PROFILE_REPORT_PATH)
-if not PROFILE_REPORT_PATH.exists():
-    raise StopExecution(
-        f"The profile report was not generated at {PROFILE_REPORT_PATH}"
-    )
+# PROFILE_REPORT_PATH = Path("profile.html")
+# if PROFILE_REPORT_PATH.exists():
+#     PROFILE_REPORT_PATH.unlink(missing_ok=True)
+#     print("Existing profile report removed")
+# utils.generate_profile_report(RAW_BACTERIA_RESISTANCE_DF, PROFILE_REPORT_PATH)
+# if not PROFILE_REPORT_PATH.exists():
+#     raise StopExecution(
+#         f"The profile report was not generated at {PROFILE_REPORT_PATH}"
+#     )
 
-
-cleaning_step = FunctionTransformer(global_cleaning, kw_args={'drop_columns': ['id', 'name', 'address', 'notes', 'email', 'collection_date']}, validate=False)
-cleaned_df = cleaning_step.transform(RAW_BACTERIA_RESISTANCE_DF)
 
 # Generate a CSV file for EDA
 eda_step = FunctionTransformer(global_cleaning, validate=False)
@@ -148,23 +123,13 @@ if not EDA_OUTPUT_PATH.exists():
 else:
     print("Existing cleaned dataset for EDA found")
 
-# Generate a profile report to check the cleaned data
-PROFILE_REPORT_PATH = Path("cleaned_profile.html")
-if PROFILE_REPORT_PATH.exists():
-    PROFILE_REPORT_PATH.unlink(missing_ok=True)
-    print("Existing profile report removed")
-utils.generate_profile_report(eda_df, PROFILE_REPORT_PATH, title="Profiling Report on Bacteria Dataset Cleaned")
-if not PROFILE_REPORT_PATH.exists():
-    raise StopExecution(
-        f"The profile report was not generated at {PROFILE_REPORT_PATH}"
-    )
 
 # ========== STEP 2: ColumnTransformer for scaling and encoding ==========
 
 # numerical_cols, boolean_cols, categorical_cols = get_column_types(cleaned_df)
 numerical_cols = ['age', 'infection_freq']
-categorical_cols = ['gender', 'strain_norm']
 boolean_cols = ['diabetes', 'hypertension', 'hospital_before']
+categorical_cols = ['gender',  'strain']
 
 
 # Encoders / scalers
@@ -182,75 +147,141 @@ boolean_transformer = Pipeline([
     ('imputer', SimpleImputer(strategy='most_frequent'))
 ])
 
+def add_resistance_features(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
+    df = df.copy()
+    df = utils.compute_family_resistance(df)
+    df = utils.compute_antibiotic_resistance(df)
+    df = utils.compute_is_MDR(df)
+    df = utils.cast_boolean_columns(df)
+    df = utils.cast_categorical_columns(df)
+    df = utils.cast_numerical_columns(df)
+    df = utils.drop_correlated_features(df)
+    df = utils.drop_nan_rows(df)
+    df = utils.drop_duplicates(df)
+    return df
+
+
+cleaning = FunctionTransformer(global_cleaning, kw_args={'drop_columns': ['id', 'name', 'address', 'notes', 'email', 'collection_date']}, validate=False)
+feature_engineering = FunctionTransformer(add_resistance_features, validate=False)
 preprocessing = ColumnTransformer([
     ('num', numeric_transformer, numerical_cols),
     ('cat', categorical_transformer, categorical_cols),
     ('bool', boolean_transformer, boolean_cols)
 ])
 
-# target_cols = [
-#     'amx/amp_resistant', 'amc_resistant', 'cz_resistant', 'fox_resistant', 
-#     'ctx/cro_resistant', 'ipm_resistant', 'gen_resistant', 'an_resistant',
-#     'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 
-#     'c_resistant', 'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant'
-# ]
 
-target_cols = [
-    'amx/amp_norm', 'amc_norm', 'cz_norm', 'fox_norm', 
-    'ctx/cro_norm', 'ipm_norm', 'gen_norm', 'an_norm',
-    'acide_nalidixique_norm', 'ofx_norm', 'cip_norm', 
-    'c_norm', 'co-trimoxazole_norm', 'furanes_norm', 'colistine_norm'
-]
+cleaning_engineering_pipeline = Pipeline([
+    ('cleaning', cleaning),
+    ('feature_engineering', feature_engineering)
+])
 
-X = cleaned_df.drop(columns=target_cols)
-y = cleaned_df[target_cols]
+RandomForest = Pipeline([
+    ('preprocess', preprocessing),
+    ('RandomForest', RandomForestClassifier(random_state=42))
+])
+
+CatBoost = Pipeline([
+    ('preprocess', preprocessing),
+    ('CatBoost', CatBoostClassifier(iterations=500, learning_rate=0.05, depth=6, verbose=0))
+])
+
+XGBoost = Pipeline([
+    ('preprocess', preprocessing),
+    ('XGBoost', XGBClassifier(n_estimators=2, max_depth=2, learning_rate=1, objective='binary:logistic'))
+])
+
+Logistic = Pipeline([
+    ('preprocess', preprocessing),
+    ('Logistic', LogisticRegression())        
+])
+
+HistGradient = Pipeline([
+    ('preprocess', preprocessing),
+    ('HistGradient', HistGradientBoostingClassifier(random_state=42))    
+])
+
+df = cleaning_engineering_pipeline.transform(RAW_BACTERIA_RESISTANCE_DF)
+
+# PROFILE_REPORT_PATH = Path("cleaned_engineered_profile.html")
+# if PROFILE_REPORT_PATH.exists():
+#     PROFILE_REPORT_PATH.unlink(missing_ok=True)
+#     print("Existing profile report removed")
+# utils.generate_profile_report(df, PROFILE_REPORT_PATH, title="Profiling Report on Bacteria Dataset Cleaned and Engineered")
+# if not PROFILE_REPORT_PATH.exists():
+#     raise StopExecution(
+#         f"The profile report was not generated at {PROFILE_REPORT_PATH}"
+#     )
+# print(df.shape)
+
+# Definition of the features and target dataset. The goal is to predict if a new strain will be MDR.
+X = df.drop(columns=["is_MDR"])
+y = df["is_MDR"]
 
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-# y_train = y_train.fillna(y_train.mode().iloc[0])
-# y_test = y_test.fillna(y_train.mode().iloc[0])
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 
-# Fit sur le train
+for model, name in zip([RandomForest, CatBoost, XGBoost], ["RF", "CB", "XG"]):
+    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='f1')
+    print(f"{name} F1: {np.mean(scores):.3f} ± {np.std(scores):.3f}")
 
-# Cross-validation sur le train
-# from sklearn.metrics import classification_report
 
-# y_pred = ml_pipeline.predict(X_test)
-# print(classification_report(y_test, y_pred))
+RandomForest.fit(X_train, y_train)
+rf_pred = RandomForest.predict(X_test)
+cm_rf = confusion_matrix(y_test, rf_pred)
+print(cm_rf)
+print(classification_report(y_test, rf_pred))
 
-# cv_scores = cross_val_score(ml_pipeline, X_train, y_train, cv=5, scoring='accuracy')
-# print(f"CV scores: {cv_scores}")
-# print(f"CV mean: {cv_scores.mean():.3f}")
+CatBoost.fit(X_train, y_train)
+cb_pred = CatBoost.predict(X_test)
+cm_cb = confusion_matrix(y_test, cb_pred)
+print(cm_cb)
+print(classification_report(y_test, cb_pred))
 
-# # Train a model for each target
-models = {}
+XGBoost.fit(X_train, y_train)
+xg_pred = XGBoost.predict(X_test)
+cm_xg = confusion_matrix(y_test, xg_pred)
+print(cm_xg)
+print(classification_report(y_test, xg_pred))
 
-for target in target_cols:
-    print(f"Training model for {target}...")
-    SeparateModel = Pipeline([
-        ('preprocess', preprocessing),
-        ('clf', RandomForestClassifier(random_state=42))
-    ])
 
-    models[target] = SeparateModel
-    SeparateModel.fit(X_train, y_train[target])
-    cv_scores = cross_val_score(SeparateModel, X_train, y_train[target], cv=5, scoring="f1")
-    print(f"CV scores: {cv_scores}")
-    print(f"CV mean: {cv_scores.mean():.3f}")
-    y_pred = SeparateModel.predict(X_test)
-    print(classification_report(y_test[target], y_pred, target_names=["Resistant", "Susceptible"]))
+param_grid = {
+    "HistGradient__learning_rate": [0.01, 0.05, 0.1],
+    "HistGradient__max_iter": [100, 200],
+    "HistGradient__max_depth": [3, 5, None]
+}
 
-# # One vs Rest Classifier example
-# ovr_model = Pipeline([
-#     ('preprocess', preprocessing),
-#     ('clf', OneVsRestClassifier(LogisticRegression(max_iter=1000, class_weight='balanced')))
-# ])
-# ovr_model.fit(X_train, y_train)
-# cv_scores = cross_val_score(ovr_model, X_train, y_train, cv=5, scoring="f1_weighted")
-# print(f"CV scores: {cv_scores}")
-# print(f"CV mean: {cv_scores.mean():.3f}")
-# target_names = ['amx/amp', 'amc', 'cz', 'fox', 'ctx/cro', 'ipm', 'gen', 'an', 'acide_nalidixique', 'ofx', 'cip', 'c', 'co-trimoxazole', 'furanes', 'colistine']
-# ovr_score = ovr_model.score(X_test, y_test)
-# y_pred = ovr_model.predict(X_test)
-# print(classification_report(y_test, y_pred, target_names=target_names))
+grid = GridSearchCV(HistGradient, param_grid, scoring='f1', cv=5, n_jobs=-1)
+
+# MLflow
+mlflow.set_tracking_uri("http://127.0.0.1:8080")
+mlflow.set_experiment("bacteria_resistance_classification")
+
+with mlflow.start_run() as run:
+    mlflow.set_tag("model_type", "HistGradientBoostingClassifier")
+
+    # Train
+    grid.fit(X_train, y_train)
+
+    # Best model
+    best_model = grid.best_estimator_
+    mlflow.log_params(grid.best_params_)
+
+    # Predict
+    y_pred = best_model.predict(X_test)
+    f1 = f1_score(y_test, y_pred)
+    mlflow.log_metric("f1_score", f1)
+
+    cm = confusion_matrix(y_test, y_pred)
+    print("Confusion Matrix:\n", cm)
+
+    report = classification_report(y_test, y_pred)
+    print(report)
+
+    # Optionally log the report as text
+    mlflow.log_text(report, "classification_report.txt")
+
+    # Log the model
+    mlflow.sklearn.log_model(best_model, artifact_path="model")

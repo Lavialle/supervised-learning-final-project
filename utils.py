@@ -13,10 +13,14 @@ def generate_profile_report(df: pd.DataFrame, output_path: Path, title: str = "P
     profile.to_file(output_path)
     print(f"Profile report generated at: {output_path}")
 
-# Normalizing data for NaN values
+# ====================================================================================================================================
+# DATA CLEANING
+# ====================================================================================================================================
+
+#  Normalizing data for NaN values
 def normalize_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    missing_tokens = ['?', 'missing', 'Missing', 'None', 'none', '', 'NaN', 'nan', 'unknown', 'error', 'n/a']
+    missing_tokens = ['?', 'missing', 'Missing', 'None', 'none', '', 'NaN', 'nan', 'unknown', 'error', 'n/a', '(Missing)']
     df.replace(to_replace=missing_tokens, value=np.nan, inplace=True)
     return df
 
@@ -87,8 +91,8 @@ def normalize_bacteria(name: str) -> str:
     
 def normalize_strain_names(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["strain_norm"] = df["strain_clean"].apply(normalize_bacteria)
-    df = df.drop(columns=["strain", "strain_clean"])
+    df["strain"] = df["strain_clean"].apply(normalize_bacteria)
+    df = df.drop(columns=["strain_clean"])
     return df
 
 # Uniformize antibiotic susceptibility values
@@ -96,7 +100,7 @@ def norm_ast(v):
     if pd.isna(v): 
         return np.nan
     s = str(v).strip().upper()
-    if s=='' or s in {'NA','N/A','?','MISSING'}: 
+    if s =='' or s in {'NA','N/A','?','MISSING'}: 
         return np.nan
     if s.startswith('R'): 
         return 'R'
@@ -114,12 +118,8 @@ def uniformize_susceptibility_values(df: pd.DataFrame) -> pd.DataFrame:
         'co-trimoxazole', 'furanes', 'colistine'
     ]
     for col in ab_cols:
-        # Appliquer la normalisation
-        df[col + "_norm"] = df[col].apply(norm_ast)
-        # # Créer une colonne binaire 'is_resistant' (1 si R, sinon 0)
-        # df[col + "_resistant"] = (df[col + "_norm"] == 'R').astype(int)
-        # Supprimer l'ancienne colonne
-        df.drop(columns=[col], inplace=True)
+        # Appply normalization
+        df[col] = df[col].apply(norm_ast)
     return df
 
 # Remove duplicate rows
@@ -142,7 +142,7 @@ def normalize_boolean_columns(df: pd.DataFrame) -> pd.DataFrame:
 # Clean and parse to datetime the collection_date column
 
 # Create a function to parse different formats
-def parse_date(val):
+def parse_date(val: str) -> pd.Timestamp:
     for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d %b %Y"):
         try:
             return pd.to_datetime(val, format=fmt, dayfirst=True)
@@ -175,17 +175,82 @@ def drop_all_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
     df.dropna(how='all', subset=subset_cols, inplace=True)
     return df
 
+
+
+# ==================================================================================================================================
+# DATA ENGINEERING
+# ==================================================================================================================================
+
+def compute_antibiotic_resistance(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    ab_cols = [
+        'amx/amp', 'amc', 'cz', 'fox', 'ctx/cro', 'ipm', 'gen',
+        'an', 'acide_nalidixique', 'ofx', 'cip', 'c',
+        'co-trimoxazole', 'furanes', 'colistine'
+    ]
+
+    for col in ab_cols:
+        df[col + '_resistant'] = (df[col] == 'R').astype(int)
+
+    df['n_resistances'] = df[[c + '_resistant' for c in ab_cols]].sum(axis=1)
+    df['resistance_rate'] = df['n_resistances'] / len(ab_cols)
+    df.drop(columns=ab_cols, inplace=True)
+    return df
+    
+
+def compute_family_resistance(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    families = {
+        'beta_lactams': ['amx/amp', 'amc', 'cz', 'fox', 'ctx/cro', 'ipm'],
+        'aminosides': ['gen', 'an'],
+        'quinolones': ['acide_nalidixique', 'ofx', 'cip'],
+        'phenicols': ['c'],
+        'sulfamides': ['co-trimoxazole'],
+        'nitrofuranes': ['furanes'],
+        'polymyxines': ['colistine']
+    }
+
+   # Count resistant families
+    def count_resistant_families(row: pd.Series) -> int:
+        resistant_families = 0
+        for family, cols in families.items():
+            for col in cols:
+                val = str(row.get(col, ""))
+                if val == "R":
+                    resistant_families += 1
+                    break
+        return resistant_families
+
+    df["n_resistant_families"] = df.apply(count_resistant_families, axis=1)
+
+    # Classify MDR/XDR/PDR
+    def classify_resistance(row: pd.Series) -> pd.DataFrame:
+        if row['n_resistant_families'] >= 3:
+            return 'MDR'
+        else:
+            return 'Non-MDR'
+
+    df['resistance_profile'] = df.apply(classify_resistance, axis=1)
+    return df
+
+def compute_is_MDR(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df['is_MDR'] = df['resistance_profile'].apply(lambda x: 1 if x == 'MDR' else 0)
+    df.drop(columns=['resistance_profile', 'resistance_rate', 'n_resistant_families', 'n_resistances'], inplace=True)
+    return df
+
+
 # Return the list of the numerical, boolean and categorical columns
 def get_column_types(df: pd.DataFrame):
     numerical_cols = ['age', 'infection_freq']
-    boolean_cols = ['diabetes', 'hypertension', 'hospital_before']
-    categorical_cols = [
-        "gender",'amx/amp_norm', 'amc_norm', 'cz_norm', 'fox_norm', 'ctx/cro_norm', 'ipm_norm', 'gen_norm',
-        'an_norm', 'acide_nalidixique_norm', 'ofx_norm', 'cip_norm', 'c_norm',
-        'co-trimoxazole_norm', 'furanes_norm', 'colistine_norm', 'strain_norm'
+    boolean_cols = [
+                    'diabetes', 'hypertension', 'hospital_before', 'is_MDR', 'amx/amp_resistant', 
+                    'amc_resistant', 'cz_resistant', 'fox_resistant', 'ctx/cro_resistant', 'ipm_resistant', 
+                    'gen_resistant', 'an_resistant', 'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 'c_resistant',
+                    'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant'
     ]
-    date_cols = ['collection_date']
-    return numerical_cols, boolean_cols, categorical_cols, date_cols
+    categorical_cols = ['gender',  'strain']
+    return numerical_cols, boolean_cols, categorical_cols
 
 # Cast categorical columns to 'category' dtype
 def cast_categorical_columns(df: pd.DataFrame) -> pd.DataFrame: 
@@ -200,10 +265,24 @@ def cast_boolean_columns(df: pd.DataFrame) -> pd.DataFrame:
     bool_cols = get_column_types(df)[1] 
     df[bool_cols] = df[bool_cols].astype('boolean') 
     return df 
-# Impute numerical columns using IterativeImputer # 
+
+# Cast numerical columns to 'float' dtype 
 def cast_numerical_columns(df: pd.DataFrame) -> pd.DataFrame: 
     df = df.copy() 
     num_cols = get_column_types(df)[0]
     df[num_cols] = df[num_cols].apply(pd.to_numeric, errors='coerce')
     return df
 
+def drop_correlated_features(df: pd.DataFrame) -> pd.DataFrame: 
+    df = df.drop(columns=[
+        'amx/amp_resistant', 'amc_resistant', 'cz_resistant', 'fox_resistant', 'ctx/cro_resistant', 'ipm_resistant',
+        'gen_resistant', 'an_resistant', 'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 'c_resistant',
+        'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant'
+    ])
+    return df
+
+def drop_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    subset_cols = df.columns.difference(['is_MDR'])
+    df.dropna(how='all', subset=subset_cols, inplace=True)
+    return df

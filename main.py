@@ -310,7 +310,6 @@ def stacking_objective(params):
         'iterations': int(params['catboost__iterations']),
         'l2_leaf_reg': params['catboost__l2_leaf_reg'],
         'verbose': 0,
-        'scale_pos_weight': params['catboost__scale_pos_weight'], # <-- MODIFIÉ
         'scale_pos_weight': proportion_MDR,
         'random_state': 42
     }
@@ -321,7 +320,6 @@ def stacking_objective(params):
         'subsample': params['xgb__subsample'],
         'colsample_bytree': params['xgb__colsample_bytree'],
         'gamma': params['xgb__gamma'],
-        'scale_pos_weight': params['xgb__scale_pos_weight'], # <-- MODIFIÉ
         'scale_pos_weight': proportion_MDR,
         'random_state': 42
     }
@@ -372,36 +370,34 @@ def stacking_objective(params):
 
 stack_space = {
     # Hyperparameters for CatBoost
-    'catboost__depth': hp.quniform('catboost__depth', 4, 8, 1),
-    'catboost__learning_rate': hp.uniform('catboost__learning_rate', 0.01, 0.2),
-    'catboost__iterations': hp.quniform('catboost__iterations', 100, 400, 50),
-    'catboost__l2_leaf_reg': hp.uniform('catboost__l2_leaf_reg', 1, 10),
-    'catboost__scale_pos_weight': hp.uniform('catboost__scale_pos_weight', 1.0, 3.0),#nv
+    'catboost__depth': hp.quniform('catboost__depth', 4, 7, 1),
+    'catboost__learning_rate': hp.uniform('catboost__learning_rate', 0.05, 0.15),
+    'catboost__iterations': hp.quniform('catboost__iterations', 200, 400, 50),
+    'catboost__l2_leaf_reg': hp.uniform('catboost__l2_leaf_reg', 2, 8),
     # Hyperparameters for XGBoost
-    'xgb__max_depth': hp.quniform('xgb__max_depth', 4, 8, 1),
-    'xgb__learning_rate': hp.uniform('xgb__learning_rate', 0.01, 0.2),
-    'xgb__n_estimators': hp.quniform('xgb__n_estimators', 100, 400, 50),
-    'xgb__subsample': hp.uniform('xgb__subsample', 0.6, 1.0),
-    'xgb__colsample_bytree': hp.uniform('xgb__colsample_bytree', 0.6, 1.0),
-    'xgb__gamma': hp.uniform('xgb__gamma', 0, 5),
-    'xgb__scale_pos_weight': hp.uniform('xgb__scale_pos_weight', 1.0, 3.0), #nv
+    'xgb__max_depth': hp.quniform('xgb__max_depth', 4, 7, 1),
+    'xgb__learning_rate': hp.uniform('xgb__learning_rate', 0.05, 0.15),
+    'xgb__n_estimators': hp.quniform('xgb__n_estimators', 200, 400, 50),
+    'xgb__subsample': hp.uniform('xgb__subsample', 0.7, 0.9),
+    'xgb__colsample_bytree': hp.uniform('xgb__colsample_bytree', 0.7, 0.9),
+    'xgb__gamma': hp.uniform('xgb__gamma', 0, 2),
     # Hyperparameters for LightGBM
-    'lgbm__num_leaves': hp.quniform('lgbm__num_leaves', 20, 40, 1),
-    'lgbm__min_child_samples': hp.quniform('lgbm__min_child_samples', 10, 30, 1),
-    'lgbm__subsample': hp.uniform('lgbm__subsample', 0.6, 1.0),
-    'lgbm__reg_alpha': hp.uniform('lgbm__reg_alpha', 0, 2),
-    'lgbm__reg_lambda': hp.uniform('lgbm__reg_lambda', 0, 2),
+    'lgbm__num_leaves': hp.quniform('lgbm__num_leaves', 20, 35, 5),
+    'lgbm__min_child_samples': hp.quniform('lgbm__min_child_samples', 15, 25, 5),
+    'lgbm__subsample': hp.uniform('lgbm__subsample', 0.7, 0.9),
+    'lgbm__reg_alpha': hp.uniform('lgbm__reg_alpha', 0, 1),
+    'lgbm__reg_lambda': hp.uniform('lgbm__reg_lambda', 0, 1),
     # Hyperparameters for RandomForest (meta-model)
-    'rf__n_estimators': hp.quniform('rf__n_estimators', 100, 400, 50),
-    'rf__max_depth': hp.quniform('rf__max_depth', 4, 10, 1)
-}
+    'rf__n_estimators': hp.quniform('rf__n_estimators', 20, 400, 50),
+    'rf__max_depth': hp.quniform('rf__max_depth', 5, 8, 1),
+}   
 
 print("\nStacked Model Optimization with RandomForest meta-model...")
 best_stack = fmin(
     fn=stacking_objective,
     space=stack_space,
     algo=tpe.suggest,
-    max_evals=100,
+    max_evals=40,
 )
 
 print("Best params for stacking:", best_stack)

@@ -3,7 +3,6 @@
 2. Preprocess the data using Pipeline module from sklearn.
 3. Train a machine learning model.
 4. Evaluate the model's performance.
-5. Save the trained model to a file.
 """
 
 # 0. Get the requirements from requirements.txt and install them using pip if not already installed.
@@ -127,8 +126,8 @@ else:
 # ========== STEP 2: ColumnTransformer for scaling and encoding ==========
 
 # numerical_cols, boolean_cols, categorical_cols = get_column_types(cleaned_df)
-numerical_cols = ['age', 'infection_freq']
-boolean_cols = ['diabetes', 'hypertension', 'hospital_before']
+numerical_cols = ['infection_freq', 'age_comorb']
+boolean_cols = ['age_bin_child', 'age_bin_adult', 'age_bin_senior', 'age_bin_elderly']#['diabetes', 'hypertension', 'hospital_before']
 categorical_cols = ['gender',  'strain']
 
 
@@ -152,6 +151,8 @@ def add_resistance_features(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame
     df = utils.compute_family_resistance(df)
     df = utils.compute_antibiotic_resistance(df)
     df = utils.compute_is_MDR(df)
+    df = utils.add_age_comorbidity_interaction(df)
+    df = utils.bin_age_and_drop(df)
     df = utils.cast_boolean_columns(df)
     df = utils.cast_categorical_columns(df)
     df = utils.cast_numerical_columns(df)
@@ -217,7 +218,8 @@ df = cleaning_engineering_pipeline.transform(RAW_BACTERIA_RESISTANCE_DF)
 # Definition of the features and target dataset. The goal is to predict if a new strain will be MDR.
 X = df.drop(columns=["is_MDR"])
 y = df["is_MDR"]
-
+print(X.info())
+print(X.isna().sum())
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
@@ -401,7 +403,7 @@ best_stack = fmin(
     fn=stacking_objective,
     space=stack_space,
     algo=tpe.suggest,
-    max_evals=50,
+    max_evals=10,
 )
 
 print("Best params for stacking:", best_stack)
@@ -480,6 +482,7 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Non-MDR', 'M
 disp.plot(cmap=plt.cm.Blues)
 plt.title("Confusion Matrix - Stacking (RF meta)")
 plt.show()
+
 
 
 # RandomForest.fit(X_train, y_train)

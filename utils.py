@@ -192,8 +192,8 @@ def compute_antibiotic_resistance(df: pd.DataFrame) -> pd.DataFrame:
     for col in ab_cols:
         df[col + '_resistant'] = (df[col] == 'R').astype(int)
 
-    df['n_resistances'] = df[[c + '_resistant' for c in ab_cols]].sum(axis=1)
-    df['resistance_rate'] = df['n_resistances'] / len(ab_cols)
+    # df['n_resistances'] = df[[c + '_resistant' for c in ab_cols]].sum(axis=1)
+    # df['resistance_rate'] = df['n_resistances'] / len(ab_cols)
     df.drop(columns=ab_cols, inplace=True)
     return df
     
@@ -236,20 +236,50 @@ def compute_family_resistance(df: pd.DataFrame) -> pd.DataFrame:
 def compute_is_MDR(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df['is_MDR'] = df['resistance_profile'].apply(lambda x: 1 if x == 'MDR' else 0)
-    df.drop(columns=['resistance_profile', 'resistance_rate', 'n_resistant_families', 'n_resistances'], inplace=True)
+    df.drop(columns=['resistance_profile', 'n_resistant_families'], inplace=True)
     return df
 
+def add_age_comorbidity_interaction(df: pd.DataFrame, age_col="age", comorb_cols=None) -> pd.DataFrame:
+    df = df.copy()
+    if comorb_cols is None:
+        comorb_cols = ["diabetes", "hypertension", "hospital_before"]
+    df["comorbidity_score"] = df[comorb_cols].sum(axis=1)
+    df[age_col] = pd.to_numeric(df[age_col], errors="coerce")
+    df["age_comorb"] = df[age_col] * df["comorbidity_score"]
+    # df["age_norm_comorb"] = (df[age_col] / 100).fillna(0) * df["comorbidity_score"]
+    return df
+
+def bin_age_and_drop(df: pd.DataFrame, age_col="age", bins=None, labels=None) -> pd.DataFrame:
+    df = df.copy()
+    if bins is None:
+        bins = [0, 18, 40, 65, 100]
+    if labels is None:
+        labels = ["child", "adult", "senior", "elderly"]
+    df[age_col] = pd.to_numeric(df[age_col], errors="coerce")
+    df["age_bin"] = pd.cut(df[age_col], bins=bins, labels=labels, include_lowest=True)
+    for label in labels:
+        col = f"age_bin_{label}"
+        df[col] = (df["age_bin"] == label).astype(int)
+    df.drop(columns=["age_bin", age_col], inplace=True)
+    return df
 
 # Return the list of the numerical, boolean and categorical columns
 def get_column_types(df: pd.DataFrame):
-    numerical_cols = ['age', 'infection_freq']
-    boolean_cols = [
-                    'diabetes', 'hypertension', 'hospital_before', 'is_MDR', 'amx/amp_resistant', 
-                    'amc_resistant', 'cz_resistant', 'fox_resistant', 'ctx/cro_resistant', 'ipm_resistant', 
-                    'gen_resistant', 'an_resistant', 'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 'c_resistant',
-                    'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant'
-    ]
-    categorical_cols = ['gender',  'strain']
+    """
+    Return (numerical_cols, boolean_cols, categorical_cols) — only existing columns.
+    """
+    cols = set(df.columns)
+
+    numerical_candidates = ['infection_freq', 'age_comorb']
+    numerical_cols = [c for c in numerical_candidates if c in cols]
+
+    boolean_cols = [c for c in df.columns if c.endswith('_resistant') or c in {'diabetes', 'hypertension', 'hospital_before', 'is_MDR', 'age_bin_child', 'age_bin_adult', 'age_bin_senior', 'age_bin_elderly'}]
+    # keep order and unique
+    boolean_cols = list(dict.fromkeys(boolean_cols))
+
+    categorical_candidates = ['gender', 'strain']
+    categorical_cols = [c for c in categorical_candidates if c in cols]
+
     return numerical_cols, boolean_cols, categorical_cols
 
 # Cast categorical columns to 'category' dtype
@@ -277,7 +307,8 @@ def drop_correlated_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns=[
         'amx/amp_resistant', 'amc_resistant', 'cz_resistant', 'fox_resistant', 'ctx/cro_resistant', 'ipm_resistant',
         'gen_resistant', 'an_resistant', 'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 'c_resistant',
-        'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant'
+        'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant', 'comorbidity_score', 'diabetes', 'hypertension',
+        'hospital_before'
     ])
     return df
 

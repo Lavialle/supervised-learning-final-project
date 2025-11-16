@@ -1,17 +1,21 @@
+"""
+Utility functions for data preprocessing and feature engineering.
+"""
+
 import pandas as pd # for data manipulation
 import numpy as np # for numerical operations
-from ydata_profiling import ProfileReport # for generating data profile reports
-from pathlib import Path # for handling file paths
+# from ydata_profiling import ProfileReport # for generating data profile reports
+# from pathlib import Path # for handling file paths
 
-# Generate a profile report to understand the data and better assess the preprocessing steps needed
-def generate_profile_report(df: pd.DataFrame, output_path: Path, title: str = "Profiling Report on Bacteria Dataset") -> None:
-    profile = ProfileReport(
-        df,
-        title=title,
-        explorative=True,
-    )
-    profile.to_file(output_path)
-    print(f"Profile report generated at: {output_path}")
+# # Generate a profile report to understand the data and better assess the preprocessing steps needed
+# def generate_profile_report(df: pd.DataFrame, output_path: Path, title: str = "Profiling Report on Bacteria Dataset") -> None:
+#     profile = ProfileReport(
+#         df,
+#         title=title,
+#         explorative=True,
+#     )
+#     profile.to_file(output_path)
+#     print(f"Profile report generated at: {output_path}")
 
 # ====================================================================================================================================
 # DATA CLEANING
@@ -191,9 +195,6 @@ def compute_antibiotic_resistance(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in ab_cols:
         df[col + '_resistant'] = (df[col] == 'R').astype(int)
-
-    # df['n_resistances'] = df[[c + '_resistant' for c in ab_cols]].sum(axis=1)
-    # df['resistance_rate'] = df['n_resistances'] / len(ab_cols)
     df.drop(columns=ab_cols, inplace=True)
     return df
     
@@ -246,7 +247,6 @@ def add_age_comorbidity_interaction(df: pd.DataFrame, age_col="age", comorb_cols
     df["comorbidity_score"] = df[comorb_cols].sum(axis=1)
     df[age_col] = pd.to_numeric(df[age_col], errors="coerce")
     df["age_comorb"] = df[age_col] * df["comorbidity_score"]
-    # df["age_norm_comorb"] = (df[age_col] / 100).fillna(0) * df["comorbidity_score"]
     return df
 
 def bin_age_and_drop(df: pd.DataFrame, age_col="age", bins=None, labels=None) -> pd.DataFrame:
@@ -301,9 +301,10 @@ def cast_numerical_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def drop_correlated_features(df: pd.DataFrame) -> pd.DataFrame: 
     df = df.drop(columns=[
-        'amx/amp_resistant', 'amc_resistant', 'cz_resistant', 'fox_resistant', 'ctx/cro_resistant', 'ipm_resistant',
+        'amx/amp_resistant', 'amc_resistant', 'cz_resistant', 'fox_resistant', 'ipm_resistant',
         'gen_resistant', 'an_resistant', 'acide_nalidixique_resistant', 'ofx_resistant', 'cip_resistant', 'c_resistant',
-        'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant', 'comorbidity_score', 'age'
+        'co-trimoxazole_resistant', 'furanes_resistant', 'colistine_resistant', 'comorbidity_score', 'hospital_before',
+        'hypertension', 'diabetes', 'age'
     ])
     return df
 

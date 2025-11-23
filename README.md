@@ -155,7 +155,7 @@ in your terminal after (you have to install it from the requirement or run the `
 
 - **Features:** age, gender, infection frequency, comorbidities (diabetes, hypertension, hospitalization_before), strain, ctx/cro_resistant.
 - **Pre-processing:** Column cleaning, missing value handling, OneHot encoding for categoricals, scaling for numericals, imputation.
-- **Model:** RandomForestClassifier, CatBoostClassifier, LogisticRegression, no hyperparameter optimization.
+- **Model:** RandomForestClassifier, CatBoostClassifier, Logistic Regression, no hyperparameter optimization.
 - **Metric:** F1-score (stratified 5-fold CV).
 - **Score:** _[F1 $\sim$ 0.51]_
 
@@ -166,7 +166,7 @@ in your terminal after (you have to install it from the requirement or run the `
 - **Features:** strain_freq (frequency encoded), age_comorb (age $\times \sum \text{comorbidities}$), infection_freq, ctx/cro_resistant, age_bin (binning on age feature).
 - **Pre-processing:** same as Baseline.
 - **Hyperparameter optimization:** with hyperopt.
-- **Stacking:** combined multiple models (XGBoost, CatBoost, LightGBM, Linear Regression) with RandomForest as meta-model.
+- **Stacking:** combined multiple models (XGBoost, CatBoost, LightGBM, Logistic Regression) with RandomForest as meta-model.
 - **Metric** F1-Score (stratified)
 - **Impact:** _[stacking F1 $\sim$ 0.61]_
 

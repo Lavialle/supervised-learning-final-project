@@ -3,14 +3,14 @@ Data preprocessing utilities for the Bacteria Resistance dataset.
 """
 
 import utils.utils as utils
-import pandas as pd # for data manipulation
-import numpy as np # for numerical operations
-from pathlib import Path # for handling file paths
-from sklearn.pipeline import Pipeline # for creating machine learning pipelines
-from sklearn.compose import ColumnTransformer # for column-wise transformations
-from sklearn.preprocessing import FunctionTransformer, StandardScaler, OneHotEncoder # for data preprocessing
-from sklearn.impute import SimpleImputer # for imputing missing values
-from sklearn.base import BaseEstimator, TransformerMixin # for custom transformers
+import pandas as pd                                                                    # for data manipulation
+import numpy as np                                                                     # for numerical operations
+from pathlib import Path                                                               # for handling file paths
+from sklearn.pipeline import Pipeline                                                  # for creating machine learning pipelines
+from sklearn.compose import ColumnTransformer                                          # for column-wise transformations
+from sklearn.preprocessing import FunctionTransformer, StandardScaler, OneHotEncoder   # for data preprocessing
+from sklearn.impute import SimpleImputer                                               # for imputing missing values
+from sklearn.base import BaseEstimator, TransformerMixin                               # for custom transformers
 
 class StopExecution(Exception):
     def _render_traceback_(self):
@@ -55,42 +55,14 @@ def global_cleaning(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
     df = utils.clean_collection_date(df)
     # Empty rows removal
     df = utils.drop_all_nan_rows(df)
-    # Optional drop columnss
+    # Optional drop columns
     if drop_columns:
         df.drop(columns=drop_columns, inplace=True, errors='ignore')
 
     return df
 
-
-
-# PROFILE_REPORT_PATH = Path("profile.html")
-# if PROFILE_REPORT_PATH.exists():
-#     PROFILE_REPORT_PATH.unlink(missing_ok=True)
-#     print("Existing profile report removed")
-# utils.generate_profile_report(RAW_BACTERIA_RESISTANCE_DF, PROFILE_REPORT_PATH)
-# if not PROFILE_REPORT_PATH.exists():
-#     raise StopExecution(
-#         f"The profile report was not generated at {PROFILE_REPORT_PATH}"
-#     )
-
-
-# Generate a CSV file for EDA
-# eda_step = FunctionTransformer(global_cleaning, validate=False)
-# eda_df = eda_step.transform(RAW_BACTERIA_RESISTANCE_DF)
-
-# EDA_OUTPUT_PATH = Path("./data/cleaned_bacteria_dataset.csv")
-# if not EDA_OUTPUT_PATH.exists():
-#     eda_df.to_csv(EDA_OUTPUT_PATH, index=False)
-#     print(f"Cleaned dataset exported for EDA: {EDA_OUTPUT_PATH.resolve()}")
-# else:
-#     print("Existing cleaned dataset for EDA found")
-
-
-# ========== STEP 2: ColumnTransformer for scaling and encoding ==========
-
-# numerical_cols, boolean_cols, categorical_cols = get_column_types(cleaned_df)
 numerical_cols = ['infection_freq', 'age_comorb']
-boolean_cols = ['ctx/cro_resistant']#['diabetes', 'hypertension', 'hospital_before']
+boolean_cols = ['ctx/cro_resistant']
 categorical_cols = ['gender', 'age_bin']
 frequency_cols = ['strain']
 
@@ -99,13 +71,13 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         self.freq_map = None
 
     def fit(self, X, y=None):
-        # X peut être DataFrame, Series ou array
+        # Different cases depending on input type
         if isinstance(X, pd.DataFrame):
             s = X['strain']
         elif isinstance(X, pd.Series):
             s = X
         elif isinstance(X, np.ndarray):
-            # Si array 2D, on le squeeze
+            # If 2D array with single column, convert to 1D
             if X.ndim == 2 and X.shape[1] == 1:
                 X = X.ravel()
             s = pd.Series(X)
@@ -128,7 +100,7 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         return s.map(self.freq_map).to_frame(name='strain_freq')
     
     def get_feature_names_out(self, input_features=None):
-        # Retourne le nom de la feature créée
+        # Returns the name of the created feature
         return np.array(['strain_freq'])
 
 
@@ -152,7 +124,7 @@ boolean_transformer = Pipeline([
     ('imputer', SimpleImputer(strategy='most_frequent'))
 ])
 
-def add_resistance_features(df: pd.DataFrame, drop_columns=None) -> pd.DataFrame:
+def add_resistance_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = utils.compute_family_resistance(df)
     df = utils.compute_antibiotic_resistance(df)

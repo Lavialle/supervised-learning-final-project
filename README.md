@@ -63,7 +63,10 @@ supervised-learning-final-project/
 │   └── Bacteria_dataset_Multiresictance.csv    # Raw dataset
 │   └── cleaned_bacteria_dataset.csv            # Clean version for EDA
 ├── main.py                                     # Main module for code execution
-├── utils/                                      # Tools and modules to preprocessing and model evaluation
+├── streamlit_app.py                            # Simulation
+├── saved_models/                               # Model used for simulation
+│   └── staked_model.pkl
+├── utils/                                      # Tools and modules to preprocessing and model
 │   └── preprocessing.py
 │   └── evaluation.py
 │   └── utils.py                                # Cleaning functions
@@ -74,7 +77,7 @@ supervised-learning-final-project/
 ├── requirements.txt
 ├── README.md
 ├── eda.ipynb                                   # Notebook for the Exploratory Data Analysis
-├── figures/                                  # Results for each models
+├── figures/                                    # Results for each models
 │   └── ...
 └── assets/
     └── bacteria_banner.jpg
@@ -87,7 +90,7 @@ supervised-learning-final-project/
 ```mermaid
 flowchart TD
     A[Raw Dataset] --> B[Global Cleaning: Missing Values, Date Parsing]
-    B --> C[Feature Engineering: Frequency Encoding, Interaction Terms]
+    B --> C[Feature Engineering: Interaction Terms]
     C --> D[Train/Test Split]
     D --> E[Preprocessing: ColumnTransformer]
     E --> F1[XGBoost]
@@ -121,33 +124,50 @@ flowchart TD
    ```
 
 4. **Run the pipeline and chose a model you want to test:**
+
    > Check if you have `uv` installed in your global environment **before** running the main.py pipeline.
+
    ```sh
    uv python install
    ```
+
    You can run the main.py script and choose a model
+
    ```sh
    python main.py --model [individual, hyperopt, stacking]
    ```
+
    > 100 iterations for stacking model -> quite long
+
+5. Or you can run the `streamlit_app.py` to simulate the admisson of the new patient (model used Stacking model)
+
+   Run:
+
+```sh
+streamlit run streamlit_app.py
+```
+
+in your terminal after (you have to install it from the requirement or run the `main.py` file).
 
 ---
 
 ## Baseline
 
-- **Features:** age, gender, infection frequency, comorbidities (diabetes, hypertension, prior hospitalization), strain.
+- **Features:** age, gender, infection frequency, comorbidities (diabetes, hypertension, hospitalization_before), strain, ctx/cro_resistant.
 - **Pre-processing:** Column cleaning, missing value handling, OneHot encoding for categoricals, scaling for numericals, imputation.
 - **Model:** RandomForestClassifier, CatBoostClassifier, LogisticRegression, no hyperparameter optimization.
 - **Metric:** F1-score (stratified 5-fold CV).
-- **Score:** _[F1 = 0.59 ± 0.03]_
+- **Score:** _[F1 $\sim$ 0.51]_
 
 ---
 
 ## Experiment Tracking
 
-- **Hyperparameter optimization:** Used Hyperopt for CatBoost, XGBoost, and stacking.
-- **Stacking:** Combined multiple models with RandomForest as meta-model.
-- **Feature engineering:** Added resistance-based features.
-- **Impact:** _[Fill in score improvements, e.g. stacking F1 = 0.76 ± 0.02]_
+- **Features:** strain_freq (frequency encoded), age_comorb (age $\times \sum \text{comorbidities}$), infection_freq, ctx/cro_resistant, age_bin (binning on age feature).
+- **Pre-processing:** same as Baseline.
+- **Hyperparameter optimization:** with hyperopt.
+- **Stacking:** combined multiple models (XGBoost, CatBoost, LightGBM, Linear Regression) with RandomForest as meta-model.
+- **Metric** F1-Score (stratified)
+- **Impact:** _[stacking F1 $\sim$ 0.61]_
 
 ---

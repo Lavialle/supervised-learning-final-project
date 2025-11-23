@@ -20,10 +20,10 @@ hospital_before = st.selectbox("Hospitalized Before", [0, 1])
 diabetes = st.selectbox("Diabetes", [0, 1])
 hypertension = st.selectbox("Hypertension", [0, 1])
 
-# Calculer age_comorb
+# Calculate age_comorb
 age_comorb = age * (diabetes + hypertension + hospital_before)
 
-# Mapper infection_freq
+# infection_freq mapping
 infection_freq_map = {
     "Never": 0,
     "Rarely": 1,
@@ -32,7 +32,7 @@ infection_freq_map = {
 }
 infection_freq = infection_freq_map[infection_freq_label]
 
-# Déterminer age_bin
+# age_bin
 if age < 18:
     age_bin = "child"
 elif age < 40:
@@ -42,7 +42,7 @@ elif age < 65:
 else:
     age_bin = "elderly"
 
-# Créer le DataFrame avec les colonnes exactes attendues par le modèle
+# Create the DataFrame with the exact columns expected by the model
 input_data = pd.DataFrame([{
     "gender": gender,
     "strain": strain,
@@ -59,17 +59,17 @@ if st.button("🔍 Predict MDR Status"):
         
         st.subheader("📊 Results")
         
-        # Affichage de la prédiction
+        # Display prediction
         if prediction == 1:
             st.error(f"⚠️ **Prediction: MDR (Multi-Drug Resistant)**")
         else:
             st.success(f"✅ **Prediction: Non-MDR**")
         
-        # Affichage de la probabilité avec une barre de progression
+        # Display probability with a progress bar
         st.write(f"**Probability of MDR:** {proba:.2%}")
         st.progress(proba)
         
-        # Interprétation du risque
+        # Risk interpretation
         if proba > 0.7:
             st.error(f"🔴 High risk of MDR ({proba:.2%})")
         elif proba > 0.4:
